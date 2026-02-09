@@ -32,12 +32,20 @@ BASE_HITS_DIR = os.path.join(_ROOT_DIR, "hits")
 DEFAULT_KEYWORD = "savastan0"  # Fallback when user has no keywords set
 KEYWORDS_JSON = os.path.join(_ROOT_DIR, "keywords.json")
 
-# Admin ID allowed to perform global restart/reset operations
-ADMIN_ID = 7678087570
+# Admin IDs allowed to perform global restart/reset operations.
+# Can be a comma-separated list in the ADMIN_IDS env var (e.g. "123,456").
+_ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", str(7678087570))
+try:
+    ADMIN_IDS = [int(x.strip()) for x in _ADMIN_IDS_RAW.split(",") if x.strip()]
+except Exception:
+    ADMIN_IDS = [7678087570]
 
 
 def _is_admin(user_id: int) -> bool:
-    return int(user_id) == int(ADMIN_ID)
+    try:
+        return int(user_id) in ADMIN_IDS
+    except Exception:
+        return False
 
 
 def _load_keywords_data() -> dict:
@@ -666,7 +674,13 @@ async def restart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     uid = update.effective_user.id
     if not _is_admin(uid):
-        await update.message.reply_text("❌ Unauthorized. This command is admin-only.")
+        # Provide diagnostic info so admin can verify their ID and configured admin list
+        try:
+            await update.message.reply_text(
+                f"❌ Unauthorized. This command is admin-only.\nYour id: {uid}\nAllowed admin ids: {ADMIN_IDS}"
+            )
+        except Exception:
+            await update.message.reply_text("❌ Unauthorized. This command is admin-only.")
         return
 
     # Attempt to remove base data directories and keywords file
@@ -878,6 +892,12 @@ async def process_links_batch(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if context.user_data.get("stop_requested"):
                     break
                 processed += 1
+                # Inform the user which link we're starting to process (helps debug missing downloads)
+                try:
+                    await update.message.reply_text(f"🔁 Starting [{idx}/{len(links)}]: {url}")
+                except Exception:
+                    pass
+
                 try:
                     await download_and_extract(update, context, url, idx, len(links), user_id)
                 except asyncio.CancelledError:
